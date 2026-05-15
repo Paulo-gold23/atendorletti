@@ -5,12 +5,12 @@
 
 // ============ CONFIG ============
 const CONFIG = {
-  // Production webhook (workflow is active)
-  // To test with editor open, change to: .../webhook-test/clinicai/chat
-  webhookUrl: 'https://n8n.srv1181762.hstgr.cloud/webhook/clinicai/chat',
-  sessionKey: 'clinicai_session_id',
-  historyKey: 'clinicai_history',
-  soundKey: 'clinicai_sound',
+  // Production webhook — Cicatrize demo
+  // To test with editor open, change to: .../webhook-test/cicatrize/chat
+  webhookUrl: 'https://n8n.srv1181762.hstgr.cloud/webhook/cicatrize/chat',
+  sessionKey: 'cicatrize_session_id',
+  historyKey: 'cicatrize_history',
+  soundKey: 'cicatrize_sound',
   maxRetries: 2,
   retryDelay: 2000,
 };
@@ -84,7 +84,7 @@ function init() {
   // If no messages yet, show initial bot greeting
   if (state.messages.length === 0) {
     setTimeout(() => {
-      addBotMessage('Oi! Aqui é a Alice, da Clínica Geral.');
+      addBotMessage('Oi! Aqui é a Ana, da Clínica Cicatrize.');
       setTimeout(() => {
         addBotMessage('Precisa de alguma coisa?');
       }, 1000);
@@ -544,7 +544,7 @@ function startNewConversation() {
 
   // Greeting after reset
   setTimeout(() => {
-    addBotMessage('Oi! Aqui é a Alice, da Clínica Geral.');
+    addBotMessage('Oi! Aqui é a Ana, da Clínica Cicatrize.');
     setTimeout(() => {
       addBotMessage('Precisa de alguma coisa?');
     }, 1000);
@@ -574,7 +574,7 @@ function exportConversation() {
     return;
   }
 
-  let text = `Conversa — Clínica Geral\n`;
+  let text = `Conversa — Clínica Cicatrize\n`;
   text += `Exportado em: ${new Date().toLocaleString('pt-BR')}\n`;
   text += `Sessão: ${state.sessionId}\n`;
   text += '—'.repeat(40) + '\n\n';
