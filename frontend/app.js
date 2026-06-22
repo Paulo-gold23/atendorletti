@@ -1,18 +1,39 @@
 /**
- * ClinicAI WhatsApp Frontend — app.js
+ * OrlettiBot WhatsApp Frontend — app.js
  * Handles chat logic, webhook integration, and UI interactions.
+ *
+ * NOTE (protótipo): Este frontend simula o WhatsApp para demonstração.
+ * A migração para a API real do WhatsApp (Evolution API) manterá a mesma
+ * lógica de session_id e o formato de mensagens — apenas o canal muda.
  */
 
 // ============ CONFIG ============
 const CONFIG = {
-  // Production webhook — Cicatrize demo
-  // To test with editor open, change to: .../webhook-test/cicatrize/chat
-  webhookUrl: 'https://n8n.srv1181762.hstgr.cloud/webhook/cicatrize/chat',
-  sessionKey: 'cicatrize_session_id',
-  historyKey: 'cicatrize_history',
-  soundKey: 'cicatrize_sound',
+  webhookUrl: 'https://n8n.srv1181762.hstgr.cloud/webhook/orletti/chat',
+  sessionKey: 'orletti_session_id',
+  historyKey: 'orletti_history',
+  soundKey: 'orletti_sound',
   maxRetries: 2,
   retryDelay: 2000,
+
+  // Limites e thresholds — nomeados para facilitar ajuste futuro
+  historyMaxMessages: 100,
+  sidebarPreviewMaxChars: 40,
+  scrollThreshold: 150,       // px do fundo para exibir o FAB
+  typingSpeedMs: 30,           // ms por caractere no delay simulado de digitação
+  typingMinDelayMs: 500,
+  typingMaxDelayMs: 2000,
+  toastDurationMs: 2500,
+  resizeDebounceMs: 150,
+  saveDebouncedMs: 300,
+  greetingInitialDelay: 800,   // delay antes da primeira saudação no init
+  greetingResetDelay: 600,     // delay após reset de conversa
+
+  // Saudação centralizada — muda aqui, reflete em init() e startNewConversation()
+  greeting: [
+    { text: 'Oi! Eu sou o Lucas, assistente virtual do Grupo Orletti 🚗', delay: 0 },
+    { text: 'Posso te ajudar a agendar uma revisão ou manutenção do seu veículo. Como posso te ajudar?', delay: 1200 },
+  ],
 };
 
 // ============ STATE ============
@@ -26,54 +47,45 @@ const state = {
   isScrolledUp: false,
   pendingAction: null,
   originalTitle: document.title,
+  assistantMsgCount: 0,  // contador separado — evita filter() a cada mensagem
 };
 
 // ============ DOM REFS ============
 const dom = {};
 
 function cacheDom() {
-  dom.chatMessages = document.getElementById('chatMessages');
-  dom.messageInput = document.getElementById('messageInput');
-  dom.sendBtn = document.getElementById('sendBtn');
+  dom.chatMessages    = document.getElementById('chatMessages');
+  dom.messageInput    = document.getElementById('messageInput');
+  dom.sendBtn         = document.getElementById('sendBtn');
   dom.typingIndicator = document.getElementById('typingIndicator');
-  dom.chatStatus = document.getElementById('chatStatus');
-  dom.sidebarTime = document.getElementById('sidebarTime');
-  dom.sidebarLastMsg = document.getElementById('sidebarLastMsg');
-  dom.sidebarBadge = document.getElementById('sidebarBadge');
-  dom.sidebar = document.getElementById('sidebar');
-  dom.backBtn = document.getElementById('backBtn');
-  dom.contactClinic = document.getElementById('contactClinic');
-  dom.scrollFab = document.getElementById('scrollFab');
-  dom.scrollFabBadge = document.getElementById('scrollFabBadge');
-  dom.dialogOverlay = document.getElementById('dialogOverlay');
-  dom.dialogText = document.getElementById('dialogText');
-  dom.dialogSubtext = document.getElementById('dialogSubtext');
-  dom.dialogConfirm = document.getElementById('dialogConfirm');
-  dom.dialogCancel = document.getElementById('dialogCancel');
-  dom.toastContainer = document.getElementById('toastContainer');
-
-  // Menu buttons
-  dom.btnNewChat = document.getElementById('btnNewChat');
-  dom.btnNewChatHeader = document.getElementById('btnNewChatHeader');
-  dom.btnSidebarMenu = document.getElementById('btnSidebarMenu');
-  dom.btnChatMenu = document.getElementById('btnChatMenu');
+  dom.chatStatus      = document.getElementById('chatStatus');
+  dom.sidebarTime     = document.getElementById('sidebarTime');
+  dom.sidebarLastMsg  = document.getElementById('sidebarLastMsg');
+  dom.sidebarBadge    = document.getElementById('sidebarBadge');
+  dom.sidebar         = document.getElementById('sidebar');
+  dom.backBtn         = document.getElementById('backBtn');
+  dom.contactClinic   = document.getElementById('contactClinic');
+  dom.scrollFab       = document.getElementById('scrollFab');
+  dom.scrollFabBadge  = document.getElementById('scrollFabBadge');
+  dom.dialogOverlay   = document.getElementById('dialogOverlay');
+  dom.dialogText      = document.getElementById('dialogText');
+  dom.dialogSubtext   = document.getElementById('dialogSubtext');
+  dom.dialogConfirm   = document.getElementById('dialogConfirm');
+  dom.dialogCancel    = document.getElementById('dialogCancel');
+  dom.toastContainer  = document.getElementById('toastContainer');
+  dom.btnSidebarMenu  = document.getElementById('btnSidebarMenu');
+  dom.btnChatMenu     = document.getElementById('btnChatMenu');
   dom.sidebarDropdown = document.getElementById('sidebarDropdown');
-  dom.chatDropdown = document.getElementById('chatDropdown');
-
-  // Menu items
-  dom.menuNewChat = document.getElementById('menuNewChat');
-  dom.menuClearChat = document.getElementById('menuClearChat');
+  dom.chatDropdown    = document.getElementById('chatDropdown');
   dom.menuToggleSound = document.getElementById('menuToggleSound');
-  dom.menuNewChat2 = document.getElementById('menuNewChat2');
-  dom.menuClearChat2 = document.getElementById('menuClearChat2');
-  dom.menuExport = document.getElementById('menuExport');
-  dom.soundLabel = document.getElementById('soundLabel');
+  dom.menuExport      = document.getElementById('menuExport');
+  dom.soundLabel      = document.getElementById('soundLabel');
 }
 
 // ============ INIT ============
 function init() {
   cacheDom();
-  state.sessionId = loadOrCreateSession();
+  state.sessionId   = loadOrCreateSession();
   state.soundEnabled = localStorage.getItem(CONFIG.soundKey) !== 'false';
   updateSoundLabel();
   loadHistory();
@@ -81,25 +93,15 @@ function init() {
   renderSavedMessages();
   handleResize();
 
-  // If no messages yet, show initial bot greeting
   if (state.messages.length === 0) {
-    setTimeout(() => {
-      addBotMessage('Oi! Aqui é a Ana, da Clínica Cicatrize.');
-      setTimeout(() => {
-        addBotMessage('Precisa de alguma coisa?');
-      }, 1000);
-    }, 800);
+    sendInitialGreeting(CONFIG.greetingInitialDelay);
   }
 }
 
 // ============ RESPONSIVE HELPERS ============
 function handleResize() {
   const isMobile = window.innerWidth <= 768;
-  if (isMobile) {
-    dom.sidebar.classList.add('sidebar-closed');
-  } else {
-    dom.sidebar.classList.remove('sidebar-closed');
-  }
+  dom.sidebar.classList.toggle('sidebar-closed', isMobile);
 }
 
 // ============ SESSION ============
@@ -116,55 +118,52 @@ function loadOrCreateSession() {
 function loadHistory() {
   try {
     const saved = localStorage.getItem(CONFIG.historyKey);
-    if (saved) state.messages = JSON.parse(saved);
+    if (saved) {
+      state.messages = JSON.parse(saved);
+      // Recalcula contador ao restaurar histórico
+      state.assistantMsgCount = state.messages.filter(m => m.role === 'assistant').length;
+    }
   } catch { state.messages = []; }
+}
+
+// Debounce: agrupa escritas próximas em uma só — evita serializar o array
+// várias vezes seguidas quando a resposta chega em múltiplos segmentos (||)
+let _saveTimer = null;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(saveHistory, CONFIG.saveDebouncedMs);
 }
 
 function saveHistory() {
   try {
-    // Keep last 100 messages to avoid localStorage bloat
-    const toSave = state.messages.slice(-100);
+    const toSave = state.messages.slice(-CONFIG.historyMaxMessages);
     localStorage.setItem(CONFIG.historyKey, JSON.stringify(toSave));
-  } catch { /* ignore quota errors */ }
+  } catch { /* ignora erros de quota */ }
 }
 
 // ============ EVENTS ============
 function setupEventListeners() {
-  // Send on button click
+
+  // --- Enviar mensagem ---
   dom.sendBtn.addEventListener('click', handleSend);
-
-  // Send on Enter (Shift+Enter for new line)
   dom.messageInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   });
-
-  // Auto-resize textarea
   dom.messageInput.addEventListener('input', () => {
     dom.messageInput.style.height = 'auto';
     dom.messageInput.style.height = Math.min(dom.messageInput.scrollHeight, 120) + 'px';
-    // Toggle send button state
     dom.sendBtn.classList.toggle('active', dom.messageInput.value.trim().length > 0);
   });
 
-  // Mobile: sidebar toggle
-  dom.backBtn.addEventListener('click', () => {
-    dom.sidebar.classList.remove('sidebar-closed');
-  });
-
+  // --- Mobile: sidebar ---
+  dom.backBtn.addEventListener('click', () => dom.sidebar.classList.remove('sidebar-closed'));
   dom.contactClinic.addEventListener('click', () => {
-    if (window.innerWidth <= 768) {
-      dom.sidebar.classList.add('sidebar-closed');
-    }
+    if (window.innerWidth <= 768) dom.sidebar.classList.add('sidebar-closed');
     dom.sidebarBadge.style.display = 'none';
   });
 
-  // Scroll detection for FAB
+  // --- Scroll FAB ---
   dom.chatMessages.addEventListener('scroll', handleScroll);
-
-  // Scroll FAB click
   dom.scrollFab.addEventListener('click', () => {
     scrollToBottom();
     state.unreadCount = 0;
@@ -172,56 +171,46 @@ function setupEventListeners() {
     dom.scrollFabBadge.textContent = '';
   });
 
-  // New chat buttons (direct)
-  dom.btnNewChat.addEventListener('click', () => showNewChatDialog());
-  dom.btnNewChatHeader.addEventListener('click', () => showNewChatDialog());
+  // --- "Nova conversa" — todos os botões que disparam a mesma ação ---
+  // (sidebar direto, header direto, menu sidebar, menu chat)
+  ['btnNewChat', 'btnNewChatHeader', 'menuNewChat', 'menuNewChat2'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', () => {
+      closeAllDropdowns();
+      showNewChatDialog();
+    });
+  });
 
-  // Dropdown menus
+  // --- "Limpar conversa" — sidebar e chat header ---
+  ['menuClearChat', 'menuClearChat2'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', () => {
+      closeAllDropdowns();
+      showClearChatDialog();
+    });
+  });
+
+  // --- Dropdowns ---
   dom.btnSidebarMenu.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleDropdown(dom.sidebarDropdown, dom.btnSidebarMenu);
   });
-
   dom.btnChatMenu.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleDropdown(dom.chatDropdown, dom.btnChatMenu);
   });
 
-  // Menu items — sidebar
-  dom.menuNewChat.addEventListener('click', () => {
-    closeAllDropdowns();
-    showNewChatDialog();
-  });
-
-  dom.menuClearChat.addEventListener('click', () => {
-    closeAllDropdowns();
-    showClearChatDialog();
-  });
-
+  // --- Itens de menu únicos ---
   dom.menuToggleSound.addEventListener('click', () => {
     state.soundEnabled = !state.soundEnabled;
     localStorage.setItem(CONFIG.soundKey, state.soundEnabled);
     updateSoundLabel();
     showToast(state.soundEnabled ? 'Som de notificação ativado' : 'Som de notificação desativado');
   });
-
-  // Menu items — chat header
-  dom.menuNewChat2.addEventListener('click', () => {
-    closeAllDropdowns();
-    showNewChatDialog();
-  });
-
-  dom.menuClearChat2.addEventListener('click', () => {
-    closeAllDropdowns();
-    showClearChatDialog();
-  });
-
   dom.menuExport.addEventListener('click', () => {
     closeAllDropdowns();
     exportConversation();
   });
 
-  // Dialog
+  // --- Dialog de confirmação ---
   dom.dialogCancel.addEventListener('click', closeDialog);
   dom.dialogOverlay.addEventListener('click', (e) => {
     if (e.target === dom.dialogOverlay) closeDialog();
@@ -231,30 +220,30 @@ function setupEventListeners() {
     closeDialog();
   });
 
-  // Close dropdowns on outside click
+  // --- Globais ---
   document.addEventListener('click', closeAllDropdowns);
-
-  // Tab visibility — clear unread on focus
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      document.title = state.originalTitle;
-    }
+    if (!document.hidden) document.title = state.originalTitle;
   });
-
-  // Escape key closes dialogs
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeDialog();
-      closeAllDropdowns();
-    }
+    if (e.key === 'Escape') { closeDialog(); closeAllDropdowns(); }
   });
 
-  // Window resize — adapt sidebar visibility
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(handleResize, 150);
+    resizeTimer = setTimeout(handleResize, CONFIG.resizeDebounceMs);
   });
+}
+
+// ============ SAUDAÇÃO INICIAL ============
+// Função única — elimina duplicação entre init() e startNewConversation()
+async function sendInitialGreeting(initialDelay = CONFIG.greetingInitialDelay) {
+  await delay(initialDelay);
+  for (const { text, delay: msgDelay } of CONFIG.greeting) {
+    if (msgDelay > 0) await delay(msgDelay);
+    addBotMessage(text);
+  }
 }
 
 // ============ SEND MESSAGE ============
@@ -267,36 +256,30 @@ async function handleSend() {
   dom.messageInput.style.height = 'auto';
   dom.sendBtn.classList.remove('active');
 
-  // Add user message to UI
   addUserMessage(text);
-
-  // Show typing indicator
   showTyping();
 
   try {
     const response = await sendToWebhook(text);
     hideTyping();
-    
-    // Separar a resposta pelo delimitador || para simular mensagens múltiplas
+
     const responseText = typeof response === 'string' ? response : JSON.stringify(response);
-    const messages = responseText.split('||');
-    
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i].trim();
-      if (msg) {
-        if (i > 0) {
-          // Mostrar "digitando..." antes da próxima mensagem
-          showTyping();
-          await delay(Math.min(msg.length * 30 + 500, 2000));
-          hideTyping();
-        }
-        addBotMessage(msg);
+    const segments = responseText.split('||');
+
+    for (let i = 0; i < segments.length; i++) {
+      const msg = segments[i].trim();
+      if (!msg) continue;
+      if (i > 0) {
+        showTyping();
+        await delay(Math.min(msg.length * CONFIG.typingSpeedMs + CONFIG.typingMinDelayMs, CONFIG.typingMaxDelayMs));
+        hideTyping();
       }
+      addBotMessage(msg);
     }
   } catch (error) {
     hideTyping();
     addBotMessage('Desculpe, ocorreu um erro na comunicação. Tente novamente em alguns instantes.');
-    console.error('[ClinicAI] Webhook error:', error);
+    console.error('[OrlettiBot] Webhook error:', error);
   }
 
   state.isSending = false;
@@ -325,7 +308,7 @@ async function sendToWebhook(message, attempt = 0) {
 
     const data = await res.json();
 
-    // Handle different n8n response formats
+    // Normaliza os diferentes formatos de resposta do n8n
     if (Array.isArray(data)) {
       return data[0]?.message || data[0]?.output || data[0]?.text || JSON.stringify(data[0]);
     }
@@ -344,7 +327,7 @@ async function sendToWebhook(message, attempt = 0) {
 function addUserMessage(text) {
   const msg = { role: 'user', content: text, time: now() };
   state.messages.push(msg);
-  saveHistory();
+  scheduleSave();
   renderMessage(msg);
   updateSidebar(text);
   scrollToBottom();
@@ -353,33 +336,33 @@ function addUserMessage(text) {
 function addBotMessage(text) {
   const msg = { role: 'assistant', content: text, time: now() };
   state.messages.push(msg);
-  saveHistory();
+  state.assistantMsgCount++;
+  scheduleSave();
   renderMessage(msg);
   updateSidebar(text);
 
-  // Sound notification
   if (state.soundEnabled) playNotificationSound();
 
-  // If scrolled up, show unread count
   if (state.isScrolledUp) {
     state.unreadCount++;
     dom.scrollFabBadge.textContent = state.unreadCount;
     dom.scrollFabBadge.classList.add('show');
+    // Badge da sidebar reflete não-lidas reais
+    dom.sidebarBadge.textContent = state.unreadCount;
   } else {
     scrollToBottom();
   }
 
-  // Tab title notification
-  if (document.hidden) {
-    document.title = `(${state.messages.filter(m => m.role === 'assistant').length}) ${state.originalTitle}`;
-  }
-
-  // Update sidebar badge
-  dom.sidebarBadge.textContent = '1';
   dom.sidebarBadge.style.display = 'flex';
+
+  // Usa contador direto — sem filter() a cada mensagem
+  if (document.hidden) {
+    document.title = `(${state.assistantMsgCount}) ${state.originalTitle}`;
+  }
 }
 
-function renderMessage(msg) {
+// Constrói o elemento DOM sem inseri-lo — permite uso com DocumentFragment
+function buildMessageElement(msg) {
   const isUser = msg.role === 'user';
   const wrapper = document.createElement('div');
   wrapper.className = `message ${isUser ? 'outgoing' : 'incoming'}`;
@@ -397,7 +380,6 @@ function renderMessage(msg) {
   const timeEl = document.createElement('span');
   timeEl.className = 'message-time';
   timeEl.textContent = msg.time;
-
   meta.appendChild(timeEl);
 
   if (isUser) {
@@ -411,15 +393,25 @@ function renderMessage(msg) {
   bubble.appendChild(meta);
   wrapper.appendChild(bubble);
 
-  // Click to copy message
   bubble.addEventListener('click', () => copyMessage(bubble, msg.content));
 
-  // Insert before typing indicator
-  dom.chatMessages.insertBefore(wrapper, dom.typingIndicator);
+  return wrapper;
 }
 
+// Insere mensagem em tempo real (durante a conversa)
+function renderMessage(msg) {
+  const el = buildMessageElement(msg);
+  dom.chatMessages.insertBefore(el, dom.typingIndicator);
+}
+
+// Renderiza o histórico salvo em um único reflow via DocumentFragment
+// Evita forçar layout do browser a cada mensagem inserida
 function renderSavedMessages() {
-  state.messages.forEach(msg => renderMessage(msg));
+  if (state.messages.length === 0) return;
+
+  const fragment = document.createDocumentFragment();
+  state.messages.forEach(msg => fragment.appendChild(buildMessageElement(msg)));
+  dom.chatMessages.insertBefore(fragment, dom.typingIndicator);
   scrollToBottom(false);
 }
 
@@ -439,16 +431,18 @@ function hideTyping() {
 
 // ============ SIDEBAR ============
 function updateSidebar(text) {
-  dom.sidebarLastMsg.textContent = text.length > 40 ? text.slice(0, 40) + '...' : text;
+  const maxChars = CONFIG.sidebarPreviewMaxChars;
+  dom.sidebarLastMsg.textContent = text.length > maxChars
+    ? text.slice(0, maxChars) + '...'
+    : text;
   dom.sidebarTime.textContent = now();
 }
 
 // ============ SCROLL MANAGEMENT ============
 function handleScroll() {
   const el = dom.chatMessages;
-  const threshold = 150;
   const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-  state.isScrolledUp = distFromBottom > threshold;
+  state.isScrolledUp = distFromBottom > CONFIG.scrollThreshold;
 
   if (state.isScrolledUp) {
     dom.scrollFab.classList.add('show');
@@ -465,19 +459,14 @@ function toggleDropdown(menu, triggerBtn) {
   const wasOpen = menu.classList.contains('show');
   closeAllDropdowns();
   if (!wasOpen) {
-    // Position the fixed dropdown relative to the trigger button
     const rect = triggerBtn.getBoundingClientRect();
     menu.style.top = (rect.bottom + 4) + 'px';
-    
     menu.style.left = 'auto';
     menu.style.right = 'auto';
-    
-    // Position based on which half of the screen the button is on
+
     if (rect.right > window.innerWidth / 2) {
-      // Right side: align right edge, but keep at least 16px from the screen edge
       menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
     } else {
-      // Left side: align left edge, but keep at least 16px from the screen edge
       menu.style.left = Math.max(16, rect.left) + 'px';
     }
 
@@ -520,41 +509,28 @@ function showClearChatDialog() {
 
 // ============ ACTIONS ============
 function startNewConversation() {
-  // Clear state
   state.messages = [];
   state.unreadCount = 0;
+  state.assistantMsgCount = 0;
 
-  // Clear localStorage
   localStorage.removeItem(CONFIG.sessionKey);
   localStorage.removeItem(CONFIG.historyKey);
 
-  // New session
   state.sessionId = loadOrCreateSession();
-
-  // Clear chat DOM
   clearChatDom();
 
-  // Reset sidebar
   dom.sidebarLastMsg.textContent = 'Toque para iniciar conversa';
   dom.sidebarTime.textContent = 'agora';
   dom.sidebarBadge.style.display = 'none';
-
-  // Reset tab title
   document.title = state.originalTitle;
 
-  // Greeting after reset
-  setTimeout(() => {
-    addBotMessage('Oi! Aqui é a Ana, da Clínica Cicatrize.');
-    setTimeout(() => {
-      addBotMessage('Precisa de alguma coisa?');
-    }, 1000);
-  }, 600);
-
+  sendInitialGreeting(CONFIG.greetingResetDelay);
   showToast('Nova conversa iniciada');
 }
 
 function clearChat() {
   state.messages = [];
+  state.assistantMsgCount = 0;
   localStorage.removeItem(CONFIG.historyKey);
   clearChatDom();
   dom.sidebarLastMsg.textContent = 'Conversa limpa';
@@ -563,9 +539,7 @@ function clearChat() {
 }
 
 function clearChatDom() {
-  // Remove all message elements, keep system message, date divider & typing
-  const messages = dom.chatMessages.querySelectorAll('.message');
-  messages.forEach(m => m.remove());
+  dom.chatMessages.querySelectorAll('.message').forEach(m => m.remove());
 }
 
 function exportConversation() {
@@ -574,22 +548,21 @@ function exportConversation() {
     return;
   }
 
-  let text = `Conversa — Clínica Cicatrize\n`;
+  let text = `Atendimento Pós-Venda — Grupo Orletti\n`;
   text += `Exportado em: ${new Date().toLocaleString('pt-BR')}\n`;
   text += `Sessão: ${state.sessionId}\n`;
   text += '—'.repeat(40) + '\n\n';
 
   state.messages.forEach(msg => {
-    const sender = msg.role === 'user' ? 'Você' : 'Ana (Bot)';
+    const sender = msg.role === 'user' ? 'Você' : 'Lucas (OrlettiBot)';
     text += `[${msg.time}] ${sender}:\n${msg.content}\n\n`;
   });
 
-  // Download as txt
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `conversa-clinica-${new Date().toISOString().slice(0,10)}.txt`;
+  a.download = `atendimento-orletti-${new Date().toISOString().slice(0, 10)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 
@@ -598,21 +571,23 @@ function exportConversation() {
 
 function copyMessage(bubble, text) {
   navigator.clipboard.writeText(text).then(() => {
-    bubble.classList.add('copied');
-    setTimeout(() => bubble.classList.remove('copied'), 1500);
+    showCopiedFeedback(bubble);
   }).catch(() => {
-    // Fallback for older browsers
+    // Fallback para browsers sem suporte à Clipboard API
     const ta = document.createElement('textarea');
     ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
+    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand('copy');
+    try { document.execCommand('copy'); } catch { /* silencioso */ }
     document.body.removeChild(ta);
-    bubble.classList.add('copied');
-    setTimeout(() => bubble.classList.remove('copied'), 1500);
+    showCopiedFeedback(bubble);
   });
+}
+
+function showCopiedFeedback(bubble) {
+  bubble.classList.add('copied');
+  setTimeout(() => bubble.classList.remove('copied'), 1500);
 }
 
 // ============ TOAST ============
@@ -624,15 +599,27 @@ function showToast(message) {
 
   setTimeout(() => {
     toast.classList.add('leaving');
-    toast.addEventListener('animationend', () => toast.remove());
-  }, 2500);
+    toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  }, CONFIG.toastDurationMs);
 }
 
 // ============ SOUND ============
+// Singleton: reutiliza o mesmo AudioContext em vez de criar um novo a cada mensagem
+// Browsers limitam o número de AudioContexts simultâneos (~6)
+let _audioCtx = null;
+
+function getAudioContext() {
+  if (!_audioCtx || _audioCtx.state === 'closed') {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (_audioCtx.state === 'suspended') _audioCtx.resume();
+  return _audioCtx;
+}
+
 function playNotificationSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
+    const ctx = getAudioContext();
+    const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -643,7 +630,7 @@ function playNotificationSound() {
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.15);
-  } catch { /* Audio not supported */ }
+  } catch { /* Audio não suportado */ }
 }
 
 function updateSoundLabel() {
@@ -664,14 +651,44 @@ function escapeHtml(text) {
 }
 
 function linkify(text) {
-  // Escape HTML first to prevent XSS, then convert URLs to clickable links
-  const safe = escapeHtml(text);
+  // Escapa HTML antes de converter URLs — previne XSS
+  let safe = escapeHtml(text);
+  
+  // 1. Proteger as URLs convertendo-as para placeholders temporários
   const urlPattern = /(https?:\/\/[^\s<]+)/g;
-  return safe.replace(urlPattern, (url) => {
-    // Truncate display text for long URLs
-    const display = url.length > 45 ? url.slice(0, 42) + '...' : url;
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="message-link">${display}</a>`;
+  const urls = [];
+  safe = safe.replace(urlPattern, (url) => {
+    const placeholder = `##URLPLACEHOLDER${urls.length}##`;
+    urls.push(url);
+    return placeholder;
   });
+
+  // 2. Parse code blocks: ```texto``` -> <pre><code>texto</code></pre>
+  safe = safe.replace(/```([\s\S]+?)```/g, '<pre><code>$1</code></pre>');
+  
+  // 3. Parse inline code: `texto` -> <code>texto</code>
+  safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // 4. Parse bold: **texto** ou *texto* -> <strong>texto</strong>
+  // Processamos primeiro ** (Markdown) para evitar conflitos com * (WhatsApp)
+  safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  safe = safe.replace(/\*([^*]+)\*/g, '<strong>$1</strong>');
+
+  // 5. Parse italic: _texto_ -> <em>texto</em>
+  safe = safe.replace(/_([^_]+)_/g, '<em>$1</em>');
+
+  // 6. Parse strikethrough: ~texto~ -> <del>texto</del>
+  safe = safe.replace(/~([^~]+)~/g, '<del>$1</del>');
+
+  // 7. Restaurar as URLs com tags <a>
+  urls.forEach((url, idx) => {
+    const placeholder = `##URLPLACEHOLDER${idx}##`;
+    const display = url.length > 45 ? url.slice(0, 42) + '...' : url;
+    const anchor = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="message-link">${display}</a>`;
+    safe = safe.replace(placeholder, anchor);
+  });
+
+  return safe;
 }
 
 function delay(ms) {
