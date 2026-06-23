@@ -31,7 +31,7 @@ const CONFIG = {
 
   // Saudação centralizada — muda aqui, reflete em init() e startNewConversation()
   greeting: [
-    { text: 'Oi! Eu sou o Lucas, assistente virtual do Grupo Orletti 🚗', delay: 0 },
+    { text: 'Oi! Eu sou o Lucas, assistente virtual do Grupo Orvel 🚗', delay: 0 },
     { text: 'Posso te ajudar a agendar uma revisão ou manutenção do seu veículo. Como posso te ajudar?', delay: 1200 },
   ],
 };
@@ -279,7 +279,7 @@ async function handleSend() {
   } catch (error) {
     hideTyping();
     addBotMessage('Desculpe, ocorreu um erro na comunicação. Tente novamente em alguns instantes.');
-    console.error('[OrlettiBot] Webhook error:', error);
+    console.error('[OrvelBot] Webhook error:', error);
   }
 
   state.isSending = false;
@@ -548,13 +548,13 @@ function exportConversation() {
     return;
   }
 
-  let text = `Atendimento Pós-Venda — Grupo Orletti\n`;
+  let text = `Atendimento Pós-Venda — Grupo Orvel\n`;
   text += `Exportado em: ${new Date().toLocaleString('pt-BR')}\n`;
   text += `Sessão: ${state.sessionId}\n`;
   text += '—'.repeat(40) + '\n\n';
 
   state.messages.forEach(msg => {
-    const sender = msg.role === 'user' ? 'Você' : 'Lucas (OrlettiBot)';
+    const sender = msg.role === 'user' ? 'Você' : 'Lucas (OrvelBot)';
     text += `[${msg.time}] ${sender}:\n${msg.content}\n\n`;
   });
 
@@ -562,7 +562,7 @@ function exportConversation() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `atendimento-orletti-${new Date().toISOString().slice(0, 10)}.txt`;
+  a.download = `atendimento-orvel-${new Date().toISOString().slice(0, 10)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 
