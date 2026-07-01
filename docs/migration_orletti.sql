@@ -38,6 +38,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_orletti_sessions_updated_at ON orletti_sessions;
 CREATE TRIGGER update_orletti_sessions_updated_at
   BEFORE UPDATE ON orletti_sessions
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -104,6 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_orletti_agendamentos_status ON orletti_agendament
 CREATE INDEX IF NOT EXISTS idx_orletti_agendamentos_preferred_date ON orletti_agendamentos(preferred_date);
 CREATE INDEX IF NOT EXISTS idx_orletti_agendamentos_vehicle_brand ON orletti_agendamentos(vehicle_brand);
 
+DROP TRIGGER IF EXISTS update_orletti_agendamentos_updated_at ON orletti_agendamentos;
 CREATE TRIGGER update_orletti_agendamentos_updated_at
   BEFORE UPDATE ON orletti_agendamentos
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -186,13 +188,68 @@ ORDER BY semana DESC, total DESC;
 
 -- ============================================================
 -- RLS (Row Level Security) — Preparação para produção
--- Em desenvolvimento: desabilitar RLS
--- Em produção: habilitar e configurar políticas
+-- Garante que chaves públicas anônimas não consigam ler/escrever dados
 -- ============================================================
--- ALTER TABLE orletti_sessions ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE orletti_conversations ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE orletti_agendamentos ENABLE ROW LEVEL SECURITY;
--- ALTER TABLE orletti_satisfaction ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orletti_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orletti_conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orletti_agendamentos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orletti_satisfaction ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de segurança: Apenas a role service_role (usada no backend/n8n)
+-- tem acesso total. Clientes anônimos ou sem autenticação adequada são bloqueados.
+DROP POLICY IF EXISTS backend_all_sessions ON orletti_sessions;
+CREATE POLICY backend_all_sessions ON orletti_sessions TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS backend_all_conversations ON orletti_conversations;
+CREATE POLICY backend_all_conversations ON orletti_conversations TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS backend_all_agendamentos ON orletti_agendamentos;
+CREATE POLICY backend_all_agendamentos ON orletti_agendamentos TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS backend_all_satisfaction ON orletti_satisfaction;
+CREATE POLICY backend_all_satisfaction ON orletti_satisfaction TO service_role USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- LGPD Compliance: Anonimização de Dados Pessoais (PII)
+-- Função para anonimizar dados de uma sessão de atendimento
+-- e expurgar logs detalhados de conversas, mantendo estatísticas
+-- ============================================================
+CREATE OR REPLACE FUNCTION orletti_anonimizar_sessao(p_session_id TEXT)
+RETURNS VOID AS $$
+BEGIN
+  -- 1. Ofuscar dados pessoais na tabela de sessões
+  UPDATE orletti_sessions
+  SET 
+    customer_name = 'Cliente Anonimizado (LGPD)',
+    customer_phone = CASE 
+      WHEN customer_phone IS NOT NULL AND LENGTH(customer_phone) >= 5 
+      THEN SUBSTRING(customer_phone FROM 1 FOR 5) || '****-****'
+      ELSE '****-****'
+    END,
+    customer_vehicle_plate = '***-****',
+    updated_at = now()
+  WHERE session_id = p_session_id;
+
+  -- 2. Ofuscar dados pessoais na tabela de agendamentos
+  UPDATE orletti_agendamentos
+  SET 
+    customer_name = 'Cliente Anonimizado (LGPD)',
+    customer_phone = CASE 
+      WHEN customer_phone IS NOT NULL AND LENGTH(customer_phone) >= 5 
+      THEN SUBSTRING(customer_phone FROM 1 FOR 5) || '****-****'
+      ELSE '****-****'
+    END,
+    vehicle_plate = '***-****',
+    customer_email = NULL,
+    notes = '[Notas removidas para conformidade LGPD]',
+    updated_at = now()
+  WHERE session_id = p_session_id;
+
+  -- 3. Deletar o histórico detalhado de mensagens da conversa (que pode conter outros dados pessoais)
+  DELETE FROM orletti_conversations
+  WHERE session_id = p_session_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================
 -- Dados de exemplo para demonstração

@@ -10,6 +10,7 @@
 // ============ CONFIG ============
 const CONFIG = {
   webhookUrl: 'https://n8n.srv1181762.hstgr.cloud/webhook/orletti/chat',
+  apiToken: 'orletti_token_secure_demo_2026', // Token de validação do webhook (Bearer Auth)
   sessionKey: 'orletti_session_id',
   historyKey: 'orletti_history',
   soundKey: 'orletti_sound',
@@ -294,7 +295,10 @@ async function sendToWebhook(message, attempt = 0) {
 
     const res = await fetch(CONFIG.webhookUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${CONFIG.apiToken}`
+      },
       body: JSON.stringify({
         message: message,
         session_id: state.sessionId,
